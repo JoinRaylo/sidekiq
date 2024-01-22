@@ -184,12 +184,27 @@ module Sidekiq
 
       # Logging here can break retries if the logging device raises ENOSPC #3979
       # logger.debug { "Failure! Retry #{count} in #{delay} seconds" }
-      jitter = rand(10) * (count + 1)
+      jitter = jitter_for(jobinst, count, delay)
       retry_at = Time.now.to_f + delay + jitter
       payload = Sidekiq.dump_json(msg)
       redis do |conn|
         conn.zadd("retry", retry_at.to_s, payload)
       end
+    end
+
+    # returns (seconds)
+    def jitter_for(jobinst, count, delay)
+      jitter = begin
+        block = jobinst&.sidekiq_retry_jitter_block
+        block&.call(count, delay)
+      rescue Exception => e
+        handle_exception(e, {context: "Failure scheduling retry using the defined `sidekiq_retry_jitter` in #{jobinst.class.name}, falling back to default"})
+        nil
+      end
+
+      # fallback to default calculation
+      jitter = rand(10) * (count + 1) if jitter.nil?
+      jitter.to_i
     end
 
     # returns (strategy, seconds)

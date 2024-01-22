@@ -51,6 +51,7 @@ module Sidekiq
         base.sidekiq_class_attribute :sidekiq_options_hash
         base.sidekiq_class_attribute :sidekiq_retry_in_block
         base.sidekiq_class_attribute :sidekiq_retries_exhausted_block
+        base.sidekiq_class_attribute :sidekiq_retry_jitter_block
       end
 
       module ClassMethods
@@ -79,6 +80,10 @@ module Sidekiq
 
         def sidekiq_retries_exhausted(&block)
           self.sidekiq_retries_exhausted_block = block
+        end
+
+        def sidekiq_retry_jitter(&block)
+          self.sidekiq_retry_jitter_block = block
         end
 
         def get_sidekiq_options # :nodoc:

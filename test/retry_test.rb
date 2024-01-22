@@ -25,6 +25,22 @@ class CustomJobWithoutException
   end
 end
 
+class CustomCountBasedJitterJobWithoutException
+  include Sidekiq::Job
+
+  sidekiq_retry_jitter do |count, _delay|
+    rand(20)**(count + 1) + 30
+  end
+end
+
+class CustomDelayBasedJitterJobWithoutException
+  include Sidekiq::Job
+
+  sidekiq_retry_jitter do |_count, delay|
+    rand((0.5 * delay).to_i)
+  end
+end
+
 class SpecialError < StandardError
 end
 
@@ -59,6 +75,14 @@ class ErrorJob
   include Sidekiq::Job
 
   sidekiq_retry_in do |count|
+    count / 0
+  end
+end
+
+class ErrorJitterJob
+  include Sidekiq::Job
+
+  sidekiq_retry_jitter do |count, _delay|
     count / 0
   end
 end
@@ -352,6 +376,11 @@ describe Sidekiq::JobRetry do
         refute_equal 4, count
       end
 
+      it "retries with a default jitter" do
+        count = handler.__send__(:jitter_for, worker, 2, 60)
+        assert_includes 0..30, count
+      end
+
       it "retries with a custom delay and exception 1" do
         strat, count = handler.__send__(:delay_for, CustomJobWithException, 2, ArgumentError.new, {})
         assert_equal :default, strat
@@ -383,10 +412,25 @@ describe Sidekiq::JobRetry do
         refute_equal 4, count
       end
 
+      it "retries with a default jitter in case of configured with nil" do
+        count = handler.__send__(:jitter_for, SomeJob, 2, 60)
+        assert_includes 0..30, count
+      end
+
       it "retries with a custom delay without exception" do
         strat, count = handler.__send__(:delay_for, CustomJobWithoutException, 2, StandardError.new, {})
         assert_equal :default, strat
         assert_includes 4..35, count
+      end
+
+      it "retries with a custom count based jitter without exception" do
+        count = handler.__send__(:jitter_for, CustomCountBasedJitterJobWithoutException, 2, 60)
+        assert_includes 30..8030, count
+      end
+
+      it "retries with a custom delay based jitter without exception" do
+        count = handler.__send__(:jitter_for, CustomDelayBasedJitterJobWithoutException, 100, 60)
+        assert_includes 0..30, count
       end
 
       it "retries with AS::Durations" do
@@ -403,6 +447,15 @@ describe Sidekiq::JobRetry do
         end
         assert_match(/Failure scheduling retry using the defined `sidekiq_retry_in`/,
           output, "Log entry missing for sidekiq_retry_in")
+      end
+
+      it "falls back to the default jitter on exception" do
+        output = capture_logging(@config) do
+          count = handler.__send__(:jitter_for, ErrorJitterJob, 2, 60)
+          assert_includes 0..30, count
+        end
+        assert_match(/Failure scheduling retry using the defined `sidekiq_retry_jitter`/,
+          output, "Log entry missing for sidekiq_retry_jitter")
       end
 
       it "kills when configured on special exceptions" do
